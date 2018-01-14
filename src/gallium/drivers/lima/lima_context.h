@@ -30,12 +30,6 @@
 #include "pipe/p_context.h"
 #include "pipe/p_state.h"
 
-#include "lima.h"
-
-struct pipe_screen;
-struct pipe_surface;
-struct lima_buffer;
-
 struct lima_context_framebuffer {
    struct pipe_surface *cbuf, *zsbuf;
    int width, height;
@@ -60,6 +54,7 @@ struct lima_depth_stencil_alpha_state {
 struct lima_fs_shader_state {
    void *shader;
    int shader_size;
+   struct lima_bo *bo;
 };
 
 #define LIMA_MAX_VARYING_NUM 13
@@ -81,6 +76,8 @@ struct lima_vs_shader_state {
    struct lima_varying_info varying[LIMA_MAX_VARYING_NUM];
    int varying_stride;
    int num_varying;
+
+   struct lima_bo *bo;
 };
 
 struct lima_rasterizer_state {
@@ -117,14 +114,13 @@ struct lima_context_constant_buffer {
 enum lima_ctx_buff {
    lima_ctx_buff_sh_varying,
    lima_ctx_buff_sh_gl_pos,
-   lima_ctx_buff_gp_vs_program,
    lima_ctx_buff_gp_varying_info,
    lima_ctx_buff_gp_attribute_info,
    lima_ctx_buff_gp_uniform,
    lima_ctx_buff_gp_vs_cmd,
    lima_ctx_buff_gp_plbu_cmd,
-   lima_ctx_buff_pp_fs_program,
    lima_ctx_buff_pp_plb_rsw,
+   lima_ctx_buff_pp_uniform_array,
    lima_ctx_buff_pp_uniform,
    lima_ctx_buff_num,
 };
@@ -173,18 +169,17 @@ struct lima_context {
    struct pipe_stencil_ref stencil_ref;
    struct lima_context_constant_buffer const_buffer[PIPE_SHADER_TYPES];
 
-   struct lima_buffer *share_buffer;
+   struct lima_bo *share_buffer;
    #define sh_plb_offset             0x00000
    /* max_plb = 512, block_size = 0x200, size = block_size * max_plb */
    #define sh_varying_offset         0x40000
    #define sh_gl_pos_offset          0x41000
    #define sh_buffer_size            0x42000
 
-   struct lima_buffer *gp_buffer;
-   #define gp_vs_program_offset      0x0000
-   #define gp_plbu_plb_offset        0x0800
-   #define gp_varying_info_offset    0x1000
-   #define gp_attribute_info_offset  0x1800
+   struct lima_bo *gp_buffer;
+   #define gp_plbu_plb_offset        0x0000
+   #define gp_varying_info_offset    0x0800
+   #define gp_attribute_info_offset  0x1000
    /* max_attr/varying_info = 16, each_info = 8, size = max * each */
    #define gp_uniform_offset         0x2000
    #define gp_vs_cmd_offset          0x3000
@@ -192,27 +187,25 @@ struct lima_context {
    #define gp_tile_heap_offset       0x4000
    #define gp_buffer_size            0x6000
 
-   struct lima_buffer *pp_buffer;
-   #define pp_fs_program_offset      0x00000
-   #define pp_uniform_array_offset   0x00800
-   #define pp_uniform_offset         0x00840
-   #define pp_frame_rsw_offset       0x01840
-   #define pp_clear_program_offset   0x01880
-   #define pp_plb_rsw_offset         0x018c0
-   #define pp_plb_offset_start       0x02040
+   struct lima_bo *pp_buffer;
+   #define pp_uniform_array_offset   0x00000
+   #define pp_uniform_offset         0x00400
+   #define pp_frame_rsw_offset       0x01400
+   #define pp_clear_program_offset   0x01440
+   #define pp_plb_rsw_offset         0x01480
+   #define pp_plb_offset_start       0x02000
    /* max_screen_w/h_size = 2048, max_pp = 4, plb_stream_size = ((max >> 4)^2 + max_pp) * 16 */
-   #define pp_stack_offset           0x42140
+   #define pp_stack_offset           0x42100
    #define pp_buffer_size            0x44000
    #define pp_plb_offset(i, n)       \
       (pp_plb_offset_start + i * ((pp_stack_offset - pp_plb_offset_start) / n))
 
    struct lima_ctx_buff_state buffer_state[lima_ctx_buff_num];
 
-   unsigned draw_start;
    unsigned num_draws;
 
-   lima_submit_handle gp_submit;
-   lima_submit_handle pp_submit;
+   struct lima_submit *gp_submit;
+   struct lima_submit *pp_submit;
 };
 
 static inline struct lima_context *
