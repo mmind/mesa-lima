@@ -29,6 +29,7 @@
 
 #include "pipe/p_state.h"
 
+#include "lima_screen.h"
 #include "lima_context.h"
 #include "lima_resource.h"
 
@@ -364,6 +365,108 @@ lima_set_constant_buffer(struct pipe_context *pctx,
                 shader, index, cb->buffer, cb->buffer_offset, cb->buffer_size);
 }
 
+static void *
+lima_create_sampler_state(struct pipe_context *pctx,
+                         const struct pipe_sampler_state *cso)
+{
+   struct lima_sampler_state *so = CALLOC_STRUCT(lima_sampler_state);
+   if (!so)
+      return NULL;
+
+   memcpy(so, cso, sizeof(*cso));
+
+   return so;
+}
+
+static void
+lima_sampler_state_delete(struct pipe_context *pctx, void *sstate)
+{
+   free(sstate);
+}
+
+static void
+lima_sampler_states_bind(struct pipe_context *pctx,
+                        enum pipe_shader_type shader, unsigned start,
+                        unsigned nr, void **hwcso)
+{
+   struct lima_context *ctx = lima_context(pctx);
+   struct lima_texture_stateobj *lima_tex = &ctx->tex_stateobj;
+   unsigned i;
+   unsigned new_nr = 0;
+
+   assert(start == 0);
+
+   for (i = 0; i < nr; i++) {
+      if (hwcso[i])
+         new_nr = i + 1;
+      lima_tex->samplers[i] = hwcso[i];
+   }
+
+   for (; i < lima_tex->num_samplers; i++) {
+      lima_tex->samplers[i] = NULL;
+   }
+
+   lima_tex->num_samplers = new_nr;
+   ctx->dirty |= LIMA_CONTEXT_DIRTY_TEXTURES;
+}
+
+static struct pipe_sampler_view *
+lima_create_sampler_view(struct pipe_context *pctx, struct pipe_resource *prsc,
+                        const struct pipe_sampler_view *cso)
+{
+   struct lima_sampler_view *so = CALLOC_STRUCT(lima_sampler_view);
+
+   if (!so)
+      return NULL;
+
+   so->base = *cso;
+
+   pipe_reference(NULL, &prsc->reference);
+   so->base.texture = prsc;
+   so->base.reference.count = 1;
+   so->base.context = pctx;
+
+   return &so->base;
+}
+
+static void
+lima_sampler_view_destroy(struct pipe_context *pctx,
+                         struct pipe_sampler_view *pview)
+{
+   struct lima_sampler_view *view = lima_sampler_view(pview);
+
+   pipe_resource_reference(&pview->texture, NULL);
+
+   free(view);
+}
+
+static void
+lima_set_sampler_views(struct pipe_context *pctx,
+                      enum pipe_shader_type shader,
+                      unsigned start, unsigned nr,
+                      struct pipe_sampler_view **views)
+{
+   struct lima_context *ctx = lima_context(pctx);
+   struct lima_texture_stateobj *lima_tex = &ctx->tex_stateobj;
+   int i;
+   unsigned new_nr = 0;
+
+   assert(start == 0);
+
+   for (i = 0; i < nr; i++) {
+      if (views[i])
+         new_nr = i + 1;
+      pipe_sampler_view_reference(&lima_tex->textures[i], views[i]);
+   }
+
+   for (; i < lima_tex->num_textures; i++) {
+      pipe_sampler_view_reference(&lima_tex->textures[i], NULL);
+   }
+
+   lima_tex->num_textures = new_nr;
+   ctx->dirty |= LIMA_CONTEXT_DIRTY_TEXTURES;
+}
+
 void
 lima_state_init(struct lima_context *ctx)
 {
@@ -392,6 +495,14 @@ lima_state_init(struct lima_context *ctx)
    ctx->base.create_vertex_elements_state = lima_create_vertex_elements_state;
    ctx->base.bind_vertex_elements_state = lima_bind_vertex_elements_state;
    ctx->base.delete_vertex_elements_state = lima_delete_vertex_elements_state;
+
+   ctx->base.create_sampler_state = lima_create_sampler_state;
+   ctx->base.delete_sampler_state = lima_sampler_state_delete;
+   ctx->base.bind_sampler_states = lima_sampler_states_bind;
+
+   ctx->base.create_sampler_view = lima_create_sampler_view;
+   ctx->base.sampler_view_destroy = lima_sampler_view_destroy;
+   ctx->base.set_sampler_views = lima_set_sampler_views;
 }
 
 void
